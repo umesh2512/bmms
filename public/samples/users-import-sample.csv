@@ -1,0 +1,5 @@
+name,email,designation,phone,role,password
+John Doe,john.doe@example.com,Chairperson,+1234567890,board_member,SecurePass@123
+Jane Smith,jane.smith@example.com,Board Secretary,+0987654321,board_secretary,SecurePass@123
+Alice Johnson,alice.j@example.com,Treasurer,,board_member,
+Bob Williams,bob.w@example.com,Director,+1122334455,board_member,

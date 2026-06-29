@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(php artisan *)",
+      "Bash(composer require *)",
+      "Bash(php -m)",
+      "Bash(curl -s -o /dev/null -w \"itasm: %{http_code}\\\\n\" http://10.1.20.252/itasm/)",
+      "Bash(curl -s -o /dev/null -w \"edugrade: %{http_code}\\\\n\" http://10.1.20.252/edugrade/)",
+      "Bash(curl -s -o /dev/null -w \"frms: %{http_code}\\\\n\" http://frms.test/)",
+      "Bash(curl -s -o /dev/null -w \"root: %{http_code}\\\\n\" http://10.1.20.252/)",
+      "Bash(python3 *)",
+      "Bash(php *)",
+      "Bash(curl -sI http://10.1.20.252/bmms/manage/login)",
+      "Bash(curl -sI http://10.1.20.252/bmms/workbench)",
+      "Bash(curl -sI http://10.1.20.252/bmms/admin/login)",
+      "Bash(grep -n 'protected $fillable\\\\|name\\\\|status' /var/www/html/bmms/app/Models/Tenant.php)",
+      "Bash(curl -s -c /tmp/bnca_cookies.txt \"http://10.1.20.252/bmms/manage/login\")",
+      "Bash(curl -sv -c /tmp/bnca_cookies.txt \"http://10.1.20.252/bmms/manage/login\")",
+      "Bash(grep -n 'protected.*$view\\\\|protected.*$sort' /var/www/html/bmms/vendor/filament/widgets/src/Widget.php)",
+      "Bash(git -C /var/www/html/bmms status)",
+      "Bash(git -C /var/www/html/bmms diff --stat)",
+      "Bash(git -C /var/www/html/bmms init)",
+      "Bash(git -C /var/www/html/bmms add -A)",
+      "Bash(git -C /var/www/html/bmms status --short)"
+    ]
+  }
+}
