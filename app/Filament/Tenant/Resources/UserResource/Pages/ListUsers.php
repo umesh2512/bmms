@@ -33,7 +33,7 @@ class ListUsers extends ListRecords
                     Placeholder::make('sample_download')
                         ->label('')
                         ->content(new HtmlString(
-                            '<a href="/samples/users-import-sample.csv" download
+                            '<a href="' . asset('samples/users-import-sample.csv') . '" download
                                 class="inline-flex items-center gap-1 text-sm text-primary-600 hover:text-primary-500 font-medium">
                                 Download sample CSV
                             </a>'
