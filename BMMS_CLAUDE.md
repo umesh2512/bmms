@@ -1,7 +1,9 @@
 # BMMS — Claude Code Project Memory
 
 **Board Meeting Management System**
-Multi-Tenant SaaS Platform | Laravel 12 | PHP 8.4+ | MariaDB 10.11+
+Multi-Tenant SaaS Platform | Laravel 13 | Filament v5 | PHP 8.4 | MariaDB
+**Last updated:** 2026-06-29 (end of session)
+**GitHub:** https://github.com/umesh2512/bmms
 
 ---
 
@@ -9,562 +11,476 @@ Multi-Tenant SaaS Platform | Laravel 12 | PHP 8.4+ | MariaDB 10.11+
 
 BMMS is a secure, multi-tenant SaaS board governance platform that replaces paper-based board packs,
 fragmented email, manual minutes, disconnected voting, and spreadsheet action tracking with one digital
-platform. It supports Indian governance and compliance workflows including Companies Act 2013,
-Secretarial Standards, audit trails, conflict-of-interest declarations, and board-level reporting.
+platform. Designed to serve education (colleges/universities), corporate (companies), NGOs, and
+government/public sector organisations with configurable terminology and field sets per sector.
 
 **SRS Version:** 2.1 (04 May 2026)
-**Current Phase:** Phase 1 — Foundation (starting fresh)
 **Project folder:** `/var/www/html/bmms`
-**Database:** `bmms_dev` (MariaDB 10.11+)
+**Database:** `bmms_dev` (MariaDB / MySQL)
 
 ---
 
 ## Tech Stack
 
-| Layer       | Technology                                      |
-|-------------|--------------------------------------------------|
-| Framework   | Laravel 12                                       |
-| PHP         | 8.4+                                             |
-| Database    | MariaDB 10.11+ / MySQL 8.0+                      |
-| Server      | Ubuntu 24.04 LTS + Apache                        |
-| Admin panel | Filament (for superadmin + tenant admin panels)  |
-| Frontend    | Blade + Tailwind CSS + Alpine.js or Livewire     |
-| Charts      | Chart.js or Filament charts                      |
-| RBAC        | spatie/laravel-permission                        |
-| Audit logs  | spatie/laravel-activitylog                       |
-| PDF export  | barryvdh/laravel-dompdf                          |
-| Excel export| maatwebsite/excel                                |
-| Payments    | Razorpay (future phase)                          |
-| Queue       | Laravel queues (database driver initially)       |
-| Scheduler   | Laravel scheduler                                |
+| Layer        | Technology                                         |
+|--------------|----------------------------------------------------|
+| Framework    | Laravel 13 (installed as 13, spec said 12 — API-compatible) |
+| PHP          | 8.4+                                               |
+| Database     | MariaDB 10.11+ / MySQL 8.0+                        |
+| Server       | Ubuntu 24.04 LTS + Apache, served at `/bmms/`      |
+| Admin panel  | Filament v5 (superadmin + tenant admin panels)     |
+| Frontend     | Blade + Tailwind CSS + Alpine.js / Livewire         |
+| Charts       | Filament ChartWidget (Chart.js underneath)         |
+| RBAC         | spatie/laravel-permission v8                       |
+| Audit logs   | spatie/laravel-activitylog v5                      |
+| PDF export   | barryvdh/laravel-dompdf                            |
+| Excel export | maatwebsite/excel                                  |
+| Payments     | Razorpay (Phase 5 — not yet built)                 |
+| Queue        | Laravel queues (database driver)                   |
 
 ---
 
-## UI Design Reference
+## Credentials & URLs
 
-A working HTML prototype exists at: `bmms-v21-prototype.html`
-**Always refer to this prototype for UI layout, colour scheme, and screen structure.**
+| Panel       | URL                                    | Email                        | Password    |
+|-------------|----------------------------------------|------------------------------|-------------|
+| Superadmin  | `http://10.1.20.252/bmms/admin`        | `admin@bmms.in`              | `Admin@1234` |
+| Tenant (BNCA) | `http://10.1.20.252/bmms/manage`     | `umesh.chavan@bnca.ac.in`    | `Bnca@1234`  |
 
-### Design tokens from prototype:
-```css
---bg: #f4f6f8
---surface: #ffffff
---surface-2: #eef3f7
---ink: #17202a
---muted: #647184
---line: #d8e0e8
---nav: #18212b          /* sidebar background */
---nav-soft: #263241
---blue: #1f6feb
---teal: #087f83
---green: #238636
---amber: #b7791f
---red: #b42318
---violet: #6f42c1
---radius: 8px
---shadow: 0 12px 30px rgba(23,32,42,0.08)
-```
-
-### Screens in prototype (use as blueprint):
-- `#workbench` — Board member landing page (upcoming meetings, pending tasks, metrics)
-- `#meetings` — Meeting list with lifecycle status
-- `#pack` — Board pack builder with page numbering + bulk upload
-- `#documents` — Document viewer with annotation modes (private/shared)
-- `#minutes` — Minutes drafting + approval workflow
-- `#voting` — Voting/resolutions with secret ballot toggle
-- `#actions` — Action item tracker
-- `#atr` — Action Taken Report generation
-- `#analytics` — Per-meeting + historical analytics
-- `#reports` — Compliance reports + audit bundle
-- `#admin` — Tenant admin panel
+**Test Data:**
+- Tenant: BNCA (id=3, slug=bnca, sector=education)
+- Test meeting: "Board Meeting - Q1 2026" (id=2), status=scheduled, 5 agenda items
+- CSV-imported users in tenant 2 (test): John Doe, Jane Smith, Alice Johnson, Bob Williams
+- Sample CSV: `http://10.1.20.252/bmms/samples/users-import-sample.csv`
 
 ---
 
 ## Architecture — Critical Rules
 
 ### Multi-Tenancy
-- Every table that holds tenant data **MUST have `tenant_id`** as a foreign key
-- Every query MUST be filtered by `tenant_id` — use global scopes or middleware
-- Tenant context resolved via middleware on every request
-- **Superadmin sees cross-tenant usage summaries ONLY — never sensitive meeting content**
-- Use Laravel Policies to enforce tenant ownership on every model action
-- Add automated tests for tenant isolation before going live
+- Every tenant-data table has `tenant_id` as a foreign key
+- Global scope `'tenant'` filters queries automatically via `BelongsToTenant` trait
+- `SetTenantContext` middleware sets `app('current_tenant_id')` on every request
+- Use `->withoutGlobalScope('tenant')` for cross-tenant queries (superadmin, login)
+- **Superadmin sees cross-tenant usage summaries ONLY — never meeting content**
 
 ### Roles (6 total)
 ```
 superadmin        — SaaS platform owner, manages all tenants
-tenant_admin      — Company Secretary / org administrator
-board_secretary   — Prepares meetings, agenda, board packs, minutes
-board_member      — Director/trustee, views packs, votes, annotates
+tenant_admin      — Company Secretary / org administrator (can access /manage)
+board_secretary   — Prepares meetings, agenda, board packs, minutes (can access /manage)
+board_member      — Director/trustee, views packs, votes
 department_head   — Department/committee level access
-guest             — External observer, assigned meeting only, no admin access
+guest             — External observer, assigned meeting only
 ```
 
 ### Meeting Lifecycle (10 stages)
 ```
-1. draft
-2. scheduled
-3. agenda_prepared
-4. board_pack_generated
-5. rsvp_active
-6. in_progress
-7. minutes_drafted
-8. minutes_under_approval
-9. closed
-10. archived
-```
-
-### Minutes Approval Workflow
-```
-draft_prepared → chair_review → director_review → revisions_requested → approved → locked → archived
-```
-
-### Action Item Statuses
-```
-to_do → in_progress → completed
-                    → overdue
-                    → deferred
-```
-
-### RSVP Options
-```
-yes | no | maybe | excused
-```
-
-### Attendance Statuses
-```
-present | absent | remote | excused | late | left_early
-```
-
-### Resolution Types
-```
-ordinary | special | circular | poll_question
-```
-
-### Vote Options
-```
-for | against | abstain
-```
-
-### Conflict Declaration Statuses
-```
-no_conflict | conflict_declared | recused | pending_declaration
+draft → scheduled → agenda_prepared → board_pack_generated → rsvp_active
+→ in_progress → minutes_drafted → minutes_under_approval → closed → archived
 ```
 
 ---
 
-## Database — All Tables
+## Database — Migrations (in order)
 
-### Core / Tenant Tables
-```sql
-tenants                  — tenant root record
-tenant_settings          — org profile, branding, preferences
-users                    — has tenant_id + role
-departments              — has tenant_id + chairperson_id
-committees               — has tenant_id + chairperson_id + secretary_id
-roles                    — spatie permission roles
-permissions              — spatie permissions
+```
+0000_00_00_000000_create_tenants_table
+0001_01_01_000000_create_users_table
+0001_01_01_000001_create_cache_table
+0001_01_01_000002_create_jobs_table
+2026_06_18_104559_create_activity_log_table
+2026_06_18_104559_create_permission_tables
+2026_06_29_000001_create_departments_table
+2026_06_29_000002_create_committees_table
+2026_06_29_000003_create_meetings_table
+2026_06_29_000004_create_meeting_attendees_table
+2026_06_29_000005_create_meeting_guests_table
+2026_06_29_000006_create_meeting_status_logs_table
+2026_06_29_000007_create_agenda_items_table
+2026_06_29_000008_create_documents_table
+2026_06_29_000009_create_meeting_documents_table
+2026_06_29_000010_create_board_packs_table
+2026_06_29_000011_create_bms_notifications_table
+2026_06_29_000012_create_resolutions_table
+2026_06_29_000013_create_action_items_table
+2026_06_29_000014_create_minutes_table
+2026_06_29_000015_add_plan_to_tenants_table         ← plan enum: free/sponsored/premium/enterprise
+2026_06_29_000016_add_minutes_fields_to_agenda_items ← NAAC, HOD, points_discussed, decisions, action_by/date
 ```
 
-### Meeting Tables
+### agenda_items columns (full — as of 2026-06-29)
 ```sql
-meetings                 — has tenant_id, type, lifecycle status, location
-meeting_attendees        — user, rsvp_status, attendance_status
-meeting_guests           — external guests
-meeting_status_logs      — lifecycle stage change history
-agenda_items             — ordered, time_allocated, resolution_required
-```
-
-### Document Tables
-```sql
-documents                — has tenant_id, version controlled
-document_versions        — version_number, uploaded_by, change_note
-meeting_documents        — links documents to meetings/agenda items, staged/published
-document_annotations     — highlight, comment, drawing — visibility: private/shared
-document_comments        — linked to document or annotation
-document_read_receipts   — who opened, when, acknowledgement, time_spent
-```
-
-### Board Pack Tables
-```sql
-board_packs              — version, published_at, generated_by
-board_pack_items         — ordered items with auto page_number
-```
-
-### Minutes Tables
-```sql
-minutes                  — linked to meeting, status (draft → locked)
-minute_versions          — revision history
-minute_approvals         — approval chain (chair → directors)
-```
-
-### Voting Tables
-```sql
-resolutions              — linked to meeting/agenda_item, type, secret_ballot flag
-votes                    — user, resolution, response, timestamp, ip_address
-polls                    — linked to meeting
-poll_responses           — user, poll, response
-```
-
-### Governance Tables
-```sql
-conflict_declarations    — linked to meeting/agenda/resolution/vendor
-action_items             — owner, due_date, priority, status, linked meeting
-action_taken_reports     — generated ATR records
-audit_logs               — all major actions (login, upload, vote, approve, etc.)
-notifications            — per user, per tenant
-```
-
-### Subscription / Billing Tables
-```sql
-subscriptions            — tenant subscription to a plan
-subscription_plans       — plan name, price, limits (meetings, storage, users)
-invoices                 — invoice_number, gst_number, tax_amount, payment_status
-```
-
-### Analytics Tables (Phase 4)
-```sql
-meeting_analytics        — aggregated per-meeting stats
-tenant_usage_summaries   — cross-meeting tenant summaries
-engagement_scores        — per member per meeting
+id, meeting_id, parent_id, order_column, title,
+naac_criteria_no,        -- education: NAAC criteria reference
+hod_resolution_no,       -- education: HOD resolution number
+hod_resolution_date,     -- education: date of HOD resolution
+points_discussed,        -- longtext: body of discussion (replaces 'description')
+decisions,               -- text: formal decisions taken
+action_by,               -- string: responsible person name
+action_date,             -- date: deadline for action
+description,             -- original generic field (kept)
+presenter_id,            -- FK users
+time_allocated,          -- minutes
+resolution_required,     -- boolean
+notes,
+timestamps
 ```
 
 ---
 
-## Key Packages to Install
+## Completed Work (as of 2026-06-29)
 
-```bash
-composer require spatie/laravel-permission
-composer require spatie/laravel-activitylog
-composer require filament/filament
-composer require maatwebsite/excel
-composer require barryvdh/laravel-dompdf
-```
+### ✅ Phase 1 — Foundation
+- Laravel 13 + MariaDB setup
+- Tenant model + TenantSetting (getSetting/setSetting, key-value store)
+- BelongsToTenant trait — global scope on all tenant models
+- SetTenantContext middleware + EnsureTenantIsActive middleware
+- Authentication (Breeze Blade stack)
+- RBAC — spatie/laravel-permission v8, 6 roles seeded
+- User model — tenant_id, status, invitation_token, last_login_at, soft deletes
+- Superadmin Filament panel at `/admin`
+- Tenant Filament panel at `/manage`
+- Audit logs — spatie/laravel-activitylog v5 on User model
+- Tenant isolation tests — `tests/Feature/TenantIsolationTest.php`
 
----
-
-## Development Phases
-
-### ✅ Phase 1 — Foundation (IN PROGRESS — session 2026-06-18)
-- [x] Laravel 13 project setup (spec said 12; 13 is current stable — no functional difference)
-- [x] Tenant model + TenantSetting model (soft deletes, getSetting/setSetting helpers)
-- [x] tenant_id global scopes via `BelongsToTenant` trait (`app/Models/Traits/BelongsToTenant.php`)
-- [x] `SetTenantContext` middleware — registered on web stack, sets `app('current_tenant_id')`
-- [x] `EnsureTenantIsActive` middleware — alias `tenant.active`, blocks suspended tenants + inactive users
-- [x] Authentication (Breeze Blade stack — login, logout, password reset)
-- [x] RBAC with spatie/laravel-permission v8 — 6 roles seeded (see Roles section)
-- [x] User model updated — tenant_id, status, invitation_token, invited_by, last_login_at, soft deletes
-- [x] User statuses: active, invited, suspended, deactivated (column on users table)
-- [x] Superadmin Filament panel at `/admin` — TenantResource + UserResource built
-- [x] Tenant Admin Filament panel at `/manage` — panel wired + `UserResource` built (session 2026-06-29)
-- [x] Basic audit logs installed (spatie/laravel-activitylog v5, LogsActivity on User model)
-- [x] Tenant Admin UserResource — list, edit, invite, suspend/activate, resend-invite actions
-- [x] User invitation flow — `InviteUserMail`, `InvitationController` (show/accept), `/invite/{token}` routes, Blade accept-invitation page
-- [x] Superadmin dashboard widget — `PlatformStatsOverview` (total/active tenants, users)
-- [x] Automated tenant isolation tests — 6 tests all pass (`tests/Feature/TenantIsolationTest.php`)
-- [x] **BUGFIX:** User model now uses `BelongsToTenant` trait — queries properly scoped by tenant_id
-
-### ✅ Phase 2 — Core BMMS (Partial)
-- [x] Departments and committees CRUD — `DepartmentResource`, `CommitteeResource` (Tenant panel, Organisation group)
-- [x] Meeting creation + lifecycle management — `MeetingResource`, `Meeting` model with 10-stage state machine, `transitionTo()`, `TRANSITIONS` constant; EditMeeting/ViewMeeting with dynamic transition header buttons
-- [x] Agenda builder with drag-to-reorder — `AgendaRelationManager` (reorderable, `order_column`)
-- [x] Attendee management + RSVP — `AttendeesRelationManager`, `GuestsRelationManager`, `MeetingAttendee`, `MeetingGuest` models
-- [x] Document upload + versioning — `DocumentsRelationManager`, `Document` + `DocumentVersion` models
-- [x] Board member landing page (workbench) — `WorkbenchController`, `resources/views/workbench.blade.php`, routes `workbench` + `rsvp.respond`
-- [x] RSVP response handler — `RsvpController@respond`
-- [x] BmsNotification model + static `notify()` helper (named `bms_notifications` to avoid Laravel conflict)
-- [x] BoardPack + BoardPackItem models and migration
-- [x] `navigationGroup` type fixed (`string|\\UnitEnum|null`) in all 3 tenant resources
-- [x] Document management resource — `DocumentResource` (Tenant panel, Documents group); create/edit/delete; file upload with type/size; version history via `VersionsRelationManager`; secure download via `DocumentDownloadController`
-- [x] Board pack generator — `BoardPackService` (generate cover PDF + TOC via dompdf, ZIP package download); `BoardPacksRelationManager` on MeetingResource (generate, publish, download PDF, download ZIP); auto-advances meeting to `board_pack_generated` on publish; `BoardPackController` for download routes
-- [x] Notification dispatch — `MeetingNotificationService::onTransition()` hooked into `Meeting::transitionTo()`; 6 triggers (scheduled, agenda_prepared, board_pack_generated, rsvp_active, in_progress, minutes_under_approval); creates `BmsNotification` records + queues `MeetingNotificationMail` email; recipient strategy per type (attendees / pending-RSVP / chair+secretary)
-
-### ⏳ Phase 2 — Remaining
-- [ ] Calendar view for meetings
-- [ ] Departmental drop folders + staged submission
+### ✅ Phase 2 — Core BMMS
+- Departments + Committees CRUD (DepartmentResource, CommitteeResource)
+- Meeting lifecycle — MeetingResource, 10-stage state machine, ViewMeeting with transition buttons
+- Agenda builder — AgendaRelationManager, reorderable (order_column)
+- Attendees + RSVP — AttendeesRelationManager, GuestsRelationManager
+- Documents — DocumentResource, DocumentsRelationManager, VersionsRelationManager, DocumentDownloadController
+- Board member workbench — WorkbenchController, workbench.blade.php
+- RSVP handler — RsvpController
+- Board pack generator — BoardPackService (dompdf cover + ZIP), BoardPacksRelationManager, BoardPackController
+- Meeting notifications — MeetingNotificationService hooked into transitionTo(), 6 triggers, email + BmsNotification
 
 ### ✅ Phase 3 — Governance
-- [x] Resolutions (ordinary/special/circular) + voting — `Resolution`, `ResolutionVote` models; `ResolutionsRelationManager` on MeetingResource (propose → open voting → cast vote → close & decide); secret ballot hides individual votes
-- [x] Decision Register — `DecisionRegisterResource` (Governance group); lists all resolutions; create standalone circular resolutions; open/close voting actions
-- [x] Action Items — `ActionItem` model (overdue detection via `isOverdue()`/`scopeOverdue()`); `ActionItemsRelationManager` on MeetingResource; `ActionItemResource` standalone (Governance group) with overdue filter and mark-done action
-- [x] Minutes drafting + approval + locking — `Minutes` model (JSON content per agenda item); `MinutesRelationManager` on MeetingResource (start draft pre-filled with agenda items → submit for review → approve & lock → download PDF); `MinutesService` generates PDF + advances meeting to closed
-- [x] Circular resolutions (Flying Minutes) — board members notified by signed-URL email (`CircularResolutionMail`); vote at `/vote/resolution/{id}` without login; `CircularResolutionController` handles pre-vote from email buttons; `ResolutionService::notifyCircularResolutionVoters()` dispatches to all tenant board members
-- [x] Minutes PDF — `resources/views/pdf/minutes.blade.php` (cover + attendance + per-agenda-item content + resolutions + signature block); `MinutesController@download`
+- Resolutions (ordinary/special/circular) + voting — Resolution, ResolutionVote, ResolutionsRelationManager
+- Decision Register — DecisionRegisterResource (Governance group), circular resolution creation
+- Action Items — ActionItem model, ActionItemsRelationManager, ActionItemResource
+- Minutes drafting + approval + locking — Minutes model, MinutesRelationManager, MinutesService
+- Circular resolutions (Flying Minutes) — signed-URL email, vote without login, CircularResolutionController
+- Minutes PDF — pdf/minutes.blade.php, MinutesController@download
+- Governance PDF export — pdf/governance-report.blade.php (4-section: meetings, attendance, resolutions, action items)
 
-### ⏳ Phase 3 — Remaining
+### ✅ Phase 4 — Analytics
+- AnalyticsService — all query methods (tenant + platform scope)
+- Tenant widgets: TenantMeetingStatsWidget, MeetingsByMonthChart, AttendanceRateChart, ResolutionOutcomeChart, ActionItemStatusChart
+- QuickStartWidget — welcome card with quick-action links for new orgs
+- TenantDashboard page — explicitly lists widgets (prevents widget bleed from Filament::getWidgets())
+- AnalyticsDashboard page — /manage/analytics, Reports group, 3 export header actions
+- Admin widgets: PlatformGrowthChart, PlatformMeetingsChart
+- AnalyticsExportController — /analytics/export/meetings.csv, /analytics/export/actions.csv, /analytics/export/governance-report.pdf
+
+### ✅ Superadmin Panel Enhancements (2026-06-29)
+- TenantResource rewritten:
+  - Auto-slug from org name (`->live(onBlur:true)->afterStateUpdated(fn(Set $set,...))`)
+  - Plan field (free/sponsored/premium/enterprise badge column)
+  - First Admin User section (name, email, password) — visible on create only
+  - `use Filament\Schemas\Components\Utilities\Set` (NOT `Filament\Forms\Set`)
+- CreateTenant page: `mutateFormDataBeforeCreate` extracts admin fields, `afterCreate` creates User + assigns tenant_admin role
+- UserResource rewritten: full CRUD, password (required create / optional edit), role select (dehydrated:false), org assignment modal, suspend/activate, Reset Password modal
+- CreateUser page: `afterCreate` → `syncRoles([$data['role']])`
+- EditUser page: `mutateFormDataBeforeFill` pre-fills role, `afterSave` syncs role
+- `->modifyQueryUsing(fn ($query) => $query->withoutGlobalScope('tenant'))` on UserResource table
+
+### ✅ Tenant Panel Enhancements (2026-06-29)
+- TenantPanelProvider: `->readOnlyRelationManagersOnResourceViewPagesByDefault(false)` — agenda/attendee/document tabs are now editable on ViewMeeting
+- Tenant UserResource — direct CRUD (no email-invite-only flow), password fields, role select, Reset Password/Change Role/Suspend/Activate/Delete row actions
+- Tenant CreateUser page: sets `tenant_id = auth()->user()->tenant_id`, syncRoles
+- Tenant EditUser page: pre-fills role, syncs on save
+- CSV user import on ListUsers page — "Import CSV" header action, FileUpload modal, duplicate-email guard, auto-generated password if blank, syncRoles, success/error notification
+- Sample CSV at `public/samples/users-import-sample.csv` — columns: name, email, designation, phone, role, password
+- Decision Register fix: `->using()` callback instead of `->mutateFormDataBeforeCreate()` (which doesn't exist on CreateAction)
+- ResolutionService: fixed route name `circular-resolution.show` (GET) for email voting links
+
+### ✅ Settings System (2026-06-29)
+- **SettingsService** (`app/Services/SettingsService.php`):
+  - Central key-value registry with typed defaults
+  - `get($key)`, `bool($key)`, `int($key)`, `all()`, `saveAll($data)`, `applySectorPreset($sector)`
+  - Static `for(Tenant $tenant)` and `current()` constructors
+  - Sector presets: education / corporate / ngo / government / other
+  - Education preset → "Board of Management", NAAC + HOD fields on
+  - Corporate preset → "Board of Directors", "Director", "Company Secretary"
+  - NGO preset → "Executive Committee", "President", "Secretary"
+  - Government preset → "Governing Council", "Member Secretary"
+- **TenantSettingsPage** (`app/Filament/Tenant/Pages/TenantSettingsPage.php`):
+  - 6 tabs: Organisation, Terminology, Meetings, Agenda & Minutes, Features, Notifications
+  - Sector dropdown applies label presets via `->afterStateUpdated()`
+  - Save button → `saveAll()` + `applySectorPreset()`
+  - Route: `/manage/tenant-settings-page`
+  - View: `resources/views/filament/tenant/pages/tenant-settings.blade.php`
+- **AgendaRelationManager** updated:
+  - Reads SettingsService on form() and table() — shows/hides NAAC Criteria, HOD Resolution, Decisions, Action By/Date based on tenant settings
+  - Custom field labels 1 & 2 supported
+  - "More Details" section (Presenter, Time) collapsed by default
+
+### ✅ Agenda / Minutes Format (2026-06-29)
+The agenda item form now matches BNCA board meeting minutes format:
+- **Item No.** — auto-incremented
+- **Title** — required
+- **NAAC Criteria No.** — education only (toggle in settings)
+- **HOD Resolution No. + Date** — education only (toggle in settings)
+- **Points Noted and Discussed** — longtext, always visible
+- **Decisions** — textarea, toggleable
+- **Action By / Action Date** — responsible person + deadline, toggleable
+- **Custom Fields 1 & 2** — user-defined labels in settings
+- **More Details** (collapsed): Presenter, Time Allocated
+
+---
+
+## Key Files Reference
+
+### Services
+```
+app/Services/AnalyticsService.php      — all analytics query methods
+app/Services/SettingsService.php       — tenant settings registry + sector presets
+app/Services/ResolutionService.php     — voting open/close + circular resolution emails
+app/Services/MinutesService.php        — minutes PDF generation
+app/Services/BoardPackService.php      — board pack PDF + ZIP
+app/Services/MeetingNotificationService.php — lifecycle transition emails
+```
+
+### Superadmin Panel (app/Filament/Admin/)
+```
+Resources/TenantResource.php           — auto-slug, plan field, first admin user on create
+Resources/TenantResource/Pages/CreateTenant.php — mutateFormDataBeforeCreate + afterCreate (creates admin user)
+Resources/UserResource.php             — full CRUD, role select, org assign, suspend/activate
+Resources/UserResource/Pages/CreateUser.php — afterCreate syncRoles
+Resources/UserResource/Pages/EditUser.php   — mutateFormDataBeforeFill (pre-fill role), afterSave syncRoles
+Widgets/PlatformStatsOverview.php
+Widgets/PlatformGrowthChart.php
+Widgets/PlatformMeetingsChart.php
+```
+
+### Tenant Panel (app/Filament/Tenant/)
+```
+Pages/TenantDashboard.php              — custom dashboard, explicit widget list
+Pages/AnalyticsDashboard.php           — /manage/analytics, 3 export actions
+Pages/TenantSettingsPage.php           — 6-tab settings page
+Resources/UserResource.php             — direct CRUD, no email-invite
+Resources/UserResource/Pages/CreateUser.php — sets tenant_id, syncRoles
+Resources/UserResource/Pages/EditUser.php   — pre-fills role, syncs on save
+Resources/UserResource/Pages/ListUsers.php  — CSV import header action + sample download
+Resources/MeetingResource.php
+Resources/MeetingResource/Pages/ViewMeeting.php
+Resources/MeetingResource/RelationManagers/AgendaRelationManager.php   — settings-driven form/table
+Resources/MeetingResource/RelationManagers/AttendeesRelationManager.php
+Resources/MeetingResource/RelationManagers/GuestsRelationManager.php
+Resources/MeetingResource/RelationManagers/DocumentsRelationManager.php
+Resources/MeetingResource/RelationManagers/BoardPacksRelationManager.php
+Resources/MeetingResource/RelationManagers/ResolutionsRelationManager.php
+Resources/MeetingResource/RelationManagers/ActionItemsRelationManager.php
+Resources/MeetingResource/RelationManagers/MinutesRelationManager.php
+Resources/DecisionRegisterResource.php — uses ->using() for CreateAction (not mutateFormDataBeforeCreate)
+Resources/ActionItemResource.php
+Resources/DocumentResource.php
+Resources/CommitteeResource.php
+Resources/DepartmentResource.php
+Widgets/TenantMeetingStatsWidget.php
+Widgets/MeetingsByMonthChart.php
+Widgets/AttendanceRateChart.php
+Widgets/ResolutionOutcomeChart.php
+Widgets/ActionItemStatusChart.php
+Widgets/QuickStartWidget.php
+```
+
+### Providers
+```
+app/Providers/Filament/AdminPanelProvider.php
+app/Providers/Filament/TenantPanelProvider.php  — includes readOnlyRelationManagersOnResourceViewPagesByDefault(false)
+```
+
+### Views
+```
+resources/views/filament/tenant/widgets/quick-start.blade.php
+resources/views/filament/tenant/pages/tenant-settings.blade.php
+resources/views/pdf/minutes.blade.php
+resources/views/pdf/governance-report.blade.php
+resources/views/pdf/board-pack-cover.blade.php
+resources/views/circular-resolution/vote.blade.php
+resources/views/workbench.blade.php
+```
+
+### Public Assets
+```
+public/samples/users-import-sample.csv    — columns: name,email,designation,phone,role,password
+```
+
+---
+
+## Filament v5 Critical Rules (will cause fatal errors if wrong)
+
+```php
+// 1. $view, $heading, $maxHeight on widgets/pages — NON-static
+protected string $view = 'filament.tenant.pages.foo';        // NOT static
+protected ?string $heading = 'My Chart';                     // NOT static
+protected ?string $maxHeight = '280px';                      // NOT static
+
+// 2. $sort on Widget — IS static
+protected static ?int $sort = 1;                             // static is correct
+
+// 3. Navigation types
+protected static string|\BackedEnum|null $navigationIcon  = Heroicon::OutlinedUsers;
+protected static string|\UnitEnum|null   $navigationGroup = 'Governance';
+
+// 4. Form schema
+use Filament\Schemas\Schema;
+public static function form(Schema $schema): Schema { return $schema->components([...]); }
+// NOT Form $form
+
+// 5. Set import (auto-slug, afterStateUpdated)
+use Filament\Schemas\Components\Utilities\Set;              // NOT Filament\Forms\Set
+
+// 6. Section import
+use Filament\Schemas\Components\Section;                    // NOT Filament\Forms\Components\Section
+
+// 7. CreateAction in headerActions() does NOT have mutateFormDataBeforeCreate
+// Use ->using() instead:
+Actions\CreateAction::make()->using(function (array $data): Model {
+    $data['tenant_id'] = auth()->user()->tenant_id;
+    return Model::create($data);
+})
+
+// 8. ViewRecord pages — relation managers are read-only by default
+// Fix in PanelProvider:
+->readOnlyRelationManagersOnResourceViewPagesByDefault(false)
+
+// 9. Password field wiped by Livewire re-render on ->live() fields
+// Fix:
+TextInput::make('password')->dehydrated(true)
+
+// 10. Filament Settings page (HasForms)
+use Filament\Forms\Concerns\InteractsWithForms;
+use Filament\Forms\Contracts\HasForms;
+use Filament\Forms\Form;           // Pages use Form, not Schema
+// form(Form $form): Form { return $form->schema([...])->statePath('data'); }
+```
+
+### Spatie activitylog v5 namespace changes
+```php
+use Spatie\Activitylog\Models\Concerns\LogsActivity;   // NOT Traits\LogsActivity
+use Spatie\Activitylog\Support\LogOptions;
+// dontLogEmptyChanges() — NOT dontSubmitEmptyLogs()
+```
+
+---
+
+## Settings System Quick Reference
+
+```php
+// Get a setting
+$s = SettingsService::current();           // uses auth()->user()->tenant
+$s = SettingsService::for($tenant);        // explicit tenant
+$s->get('agenda_show_naac');               // string value
+$s->bool('feature_committees');            // boolean
+$s->int('meeting_quorum_percent');         // integer
+$s->all();                                 // merged array (defaults + DB)
+
+// Save settings (from form data array)
+$s->saveAll($data);
+
+// Apply sector preset
+$s->applySectorPreset('education');        // education/corporate/ngo/government/other
+
+// Available setting keys (with defaults):
+// org_sector (education), org_website, org_established_year, org_address
+// meeting_quorum_percent (51), meeting_notice_days (7), meeting_default_duration (120)
+// meeting_allow_virtual (1), meeting_rsvp_required (1), meeting_max_guests (5)
+// label_board (Board), label_chairperson (Chairperson), label_secretary (Board Secretary)
+// label_member (Board Member), label_meeting (Meeting)
+// agenda_show_naac (0), agenda_show_hod_resolution (0)
+// agenda_show_action (1), agenda_show_decisions (1)
+// agenda_custom_label_1, agenda_custom_label_2
+// feature_committees (1), feature_departments (1), feature_circular_resolution (1)
+// feature_action_items (1), feature_board_packs (1), feature_minutes (1), feature_analytics (1)
+// notify_meeting_reminder (1), notify_reminder_days (3)
+// notify_action_item_reminder (1), notify_action_due_days (2)
+// notify_minutes_on_approval (1), notify_circular_resolution (1)
+```
+
+---
+
+## CSV User Import
+
+Format: `name,email,designation,phone,role,password`
+- role defaults to `board_member` if blank or invalid
+- password auto-generated (`Str::random(12).'!1'`) if blank
+- duplicate emails skipped (no overwrite)
+- Valid roles: `tenant_admin`, `board_secretary`, `board_member`, `guest`
+- Sample: `public/samples/users-import-sample.csv`
+- Import modal: Users list → "Import CSV" button → file upload + sample download link
+
+---
+
+## Pending / Next Session
+
+### Phase 2 remaining
+- [ ] Calendar view for meetings (month/week view for board members)
+- [ ] Departmental drop folders + staged document submission
+
+### Phase 3 remaining
 - [ ] Action Taken Report (ATR) PDF/Excel export
 - [ ] Conflict-of-interest declarations + register
 - [ ] Document annotations (private)
 
-### ✅ Phase 4 — Analytics (complete 2026-06-29)
-- [x] AnalyticsService — all query methods (meeting, attendance, resolution, action item, document stats)
-- [x] TenantMeetingStatsWidget — StatsOverviewWidget (5 KPI cards)
-- [x] MeetingsByMonthChart — bar chart with 6/12/24-month filter
-- [x] AttendanceRateChart — line chart (last 10 meetings)
-- [x] ResolutionOutcomeChart — doughnut (passed/failed/pending/withdrawn)
-- [x] ActionItemStatusChart — doughnut (open/done/overdue/cancelled)
-- [x] AnalyticsDashboard page — /manage/analytics, Reports nav group, 3 export header actions
-- [x] TenantDashboard page — replaces default Dashboard, only AccountWidget (prevents widget bleed)
-- [x] PlatformGrowthChart (admin) — new organisations per month bar chart
-- [x] PlatformMeetingsChart (admin) — platform meetings per month line chart
-- [x] AnalyticsExportController — /analytics/export/meetings.csv, /analytics/export/actions.csv, /analytics/export/governance-report.pdf
-- [x] governance-report.blade.php — 4-section PDF (meetings, attendance, resolutions, action items)
-- KEY: $heading/$maxHeight are NON-static in ChartWidget/StatsOverviewWidget; $sort is static
-- KEY: $navigationIcon type must be string|\BackedEnum|null (not ?string)
+### Settings system — future enhancements
+- [ ] Feature toggles actually hide nav items (currently only affects agenda form)
+  - Committees, Departments, Action Items, Analytics nav hidden when feature disabled
+- [ ] Custom terminology used in navigation labels and page headings
+- [ ] Logo upload in org settings (currently Tenant.logo_path exists but no UI)
 
-### ⏳ Phase 5 — SaaS Commercial
-- [ ] Subscription plans management
-- [ ] Billing records + GST invoice generation
-- [ ] Razorpay payment integration + webhooks
-- [ ] Tenant usage metrics + limits enforcement
-- [ ] Tenant suspension for non-payment
+### Phase 5 — SaaS Commercial
+- [ ] Subscription plans + billing
+- [ ] Razorpay integration
+- [ ] Tenant usage limits enforcement
 
-### ⏳ Phase 6 — Production Hardening
-- [ ] Security review + penetration testing
-- [ ] Performance optimisation (indexes, caching, queued exports)
-- [ ] Backup automation
-- [ ] Queue workers + scheduler setup
-- [ ] SSL + HTTPS enforcement
-- [ ] Monitoring + error reporting
-- [ ] Offline sync security hardening (future)
-- [ ] Digital signature review (future)
+### Phase 6 — Production Hardening
+- [ ] Security review
+- [ ] Performance (indexes, caching, queued exports)
+- [ ] Backup automation, queue workers, scheduler setup
+- [ ] SSL + HTTPS, monitoring
 
 ---
 
-## Access Control Matrix
-
-| Module          | Superadmin     | Tenant Admin    | Board Secretary | Board Member       | Dept Head      | Guest         |
-|-----------------|----------------|-----------------|-----------------|--------------------|----------------|---------------|
-| Tenant Mgmt     | Full           | Own settings    | No              | No                 | No             | No            |
-| Users / RBAC    | Full           | Full (tenant)   | Limited         | No                 | No             | No            |
-| Meetings        | Usage summary  | Full (tenant)   | Create/manage   | Assigned only      | Dept only      | Assigned only |
-| Documents       | Support access | Full (tenant)   | Manage          | Assigned only      | Dept only      | Assigned only |
-| Minutes         | No content     | Full (tenant)   | Manage          | Review/approve     | Dept only      | View if assigned |
-| Voting          | Summary        | Full (tenant)   | Manage          | Vote               | Vote if eligible | Usually no  |
-| Analytics       | Cross-tenant   | Full (tenant)   | Meeting level   | Own/high-level     | Dept view      | No            |
-| Billing         | Full           | Own subscription| No              | No                 | No             | No            |
-
----
-
-## Coding Conventions
-
-- **Always scope queries by `tenant_id`** — use global scopes on models, middleware sets tenant context
-- Use `spatie/laravel-permission` for all role/permission checks — never hardcode role strings in logic
-- Use Laravel Policies for authorisation — every model needs a Policy
-- Soft deletes enabled on all main models
-- `$request->validate([...])` on all form inputs
-- Queue all heavy operations (PDF generation, bulk email, analytics export)
-- Audit log all major actions via `spatie/laravel-activitylog`
-- Documents stored in private storage — never in `public/` — serve via signed temporary URLs
-- Flash messages: `session()->flash('success', '...')` / `session()->flash('error', '...')`
-- Blade layout: `@extends('layouts.app')`
-- Tailwind CSS only for styling
-- All dates stored as UTC, displayed in user's timezone
-- Use Filament for admin panels (superadmin + tenant admin)
-- Use Blade + Alpine.js or Livewire for board member-facing UI
-
----
-
-## Common Artisan Commands
+## Common Commands
 
 ```bash
-# Create project (run once)
-composer create-project laravel/laravel bmms
-cd /var/www/html/bmms
-
-# Run migrations
-php artisan migrate
-
-# Rollback last migration
-php artisan migrate:rollback
-
-# Seed subscription plans / roles
-php artisan db:seed
-
 # Clear all caches
 php artisan optimize:clear
 
 # Check routes
-php artisan route:list
+php artisan route:list --path=manage
 
-# Generate Filament resource
-php artisan make:filament-resource Tenant --generate
+# Migration status
+php artisan migrate:status
 
 # Tail logs
 tail -f storage/logs/laravel.log
 
-# Fix permissions (run after file changes as root)
-chown -R umesh:www-data /var/www/html/bmms
+# Tinker (no interactive mode for scripting)
+php artisan tinker --no-interaction 2>&1 <<'EOF'
+\App\Models\Tenant::all(['id','name','slug','status']);
+EOF
+
+# Fix permissions
+chown -R www-data:www-data /var/www/html/bmms/storage
 chmod -R 775 /var/www/html/bmms/storage /var/www/html/bmms/bootstrap/cache
+
+# Git push (token required each time — store safely, do not commit)
+git remote set-url origin https://umesh2512:<TOKEN>@github.com/umesh2512/bmms.git
+git push
+git remote set-url origin https://github.com/umesh2512/bmms.git
 ```
-
----
-
-## Environment
-
-```
-APP_ENV=local
-APP_URL=http://localhost (or server IP)
-DB_CONNECTION=mysql
-DB_DATABASE=bmms_dev
-DB_USERNAME=umesh (or root)
-QUEUE_CONNECTION=database
-MAIL_MAILER=smtp  (configure before notifications)
-FILESYSTEM_DISK=local  (private storage for documents)
-```
-
----
-
-## Security Rules (non-negotiable)
-
-- All documents in private storage — never public — signed URLs only
-- Tenant isolation tested with automated tests before any production use
-- Voting records are immutable after casting
-- Approved minutes are locked — no edits without audit trail
-- Secret ballot: voter identity hidden from normal viewers but preserved for audit
-- CSRF protection on all forms (Laravel default)
-- Input validation on every form and API endpoint
-- Audit log: login, document upload, document view, board pack generation, vote cast, minutes approval, user/role changes, tenant settings changes
-- HTTPS mandatory in production
-
----
-
-## Known Decisions Made
-
-- **Tenancy approach:** Single database, `tenant_id` column on every tenant-owned table (NOT stancl/tenancy package for Phase 1 — custom middleware for control and simplicity)
-- **Admin panels:** Filament for superadmin and tenant admin panels
-- **Interactive UI:** Alpine.js or Livewire for board member-facing screens
-- **Document storage:** Private Laravel disk, signed temporary URLs
-- **Payments:** Razorpay (India) + GST invoices — Phase 5 only
-- **Out of scope Phase 1:** Video conferencing, AI transcription, native apps, digital signatures, white-label, dedicated DB per tenant
-- **Laravel version:** Installed 13 (current stable as of 2026-06-18); spec said 12 but 13 is API-compatible for our use
-- **Filament version:** v5 (not v3/v4) — significant API changes from v3 (see Filament v5 Notes below)
-
----
-
-## Out of Scope (Do Not Build Yet)
-
-- Built-in video conferencing
-- AI-based live transcription or document summarisation
-- Native Android/iOS apps
-- Digital signature integration (Phase 6+)
-- Self-hosted white-label for customers
-- Enterprise dedicated database per tenant (Phase 2+)
-- Offline sync (Phase 3+)
-
----
-
-## Filament v5 Notes (Critical — API changed from v3/v4)
-
-These traps will cause fatal errors if you use the old Filament v3 syntax:
-
-```php
-// WRONG (Filament v3/v4):
-use Filament\Forms\Form;
-public static function form(Form $form): Form { ... }
-protected static ?string $navigationIcon = 'heroicon-o-users';
-// In panel: ->authorization(fn($user) => ...)
-
-// CORRECT (Filament v5):
-use Filament\Schemas\Schema;
-public static function form(Schema $schema): Schema { ... }
-protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;
-// In User model: implement FilamentUser, add canAccessPanel(Panel $panel): bool
-
-// Schema vs Form layout:
-return $schema->components([
-    \Filament\Schemas\Components\Section::make('Title')->schema([...]),  // Section from schemas
-    \Filament\Forms\Components\TextInput::make('name'),                  // Inputs from forms
-]);
-```
-
-**Spatie activitylog v5 namespace changes:**
-```php
-use Spatie\Activitylog\Models\Concerns\LogsActivity;  // NOT Spatie\Activitylog\Traits\LogsActivity
-use Spatie\Activitylog\Support\LogOptions;             // NOT Spatie\Activitylog\LogOptions
-// dontSubmitEmptyLogs() is now dontLogEmptyChanges()
-```
-
----
-
-## Superadmin Credentials
-
-- **URL:** `/admin`
-- **Email:** `admin@bmms.in`
-- **Password:** `Admin@1234`
-
----
-
-## File Structure Created (Phase 1)
-
-```
-app/
-  Models/
-    Tenant.php
-    TenantSetting.php
-    User.php                        ← updated with BMMS fields + FilamentUser
-    Traits/
-      BelongsToTenant.php           ← use on ALL tenant-scoped models
-  Http/Middleware/
-    SetTenantContext.php            ← auto-registered on web stack
-    EnsureTenantIsActive.php        ← alias: tenant.active
-  Filament/
-    Admin/                          ← superadmin panel (/admin)
-      Resources/
-        TenantResource.php + Pages/
-        UserResource.php + Pages/
-    Tenant/                         ← tenant panel (/manage) — EMPTY, build next session
-      Resources/
-      Pages/
-      Widgets/
-  Providers/Filament/
-    AdminPanelProvider.php
-    TenantPanelProvider.php
-database/
-  migrations/
-    0000_00_00_000000_create_tenants_table.php
-    0001_01_01_000000_create_users_table.php   ← replaced with BMMS schema
-  seeders/
-    RolesAndPermissionsSeeder.php
-    SuperAdminSeeder.php
-    DatabaseSeeder.php
-```
-
----
-
-## START HERE — Next Session
-
-**Phase 1 COMPLETE. Phase 2 partially complete.**
-
-### Phase 2 completed items:
-- Departments, Committees CRUD (DepartmentResource, CommitteeResource)
-- Meeting lifecycle (MeetingResource, 10-stage state machine, EditMeeting/ViewMeeting transition buttons)
-- Agenda (AgendaRelationManager, reorderable)
-- Attendees + Guests (AttendeesRelationManager, GuestsRelationManager)
-- Documents (DocumentsRelationManager, Document/DocumentVersion models)
-- Board Member Workbench (`/workbench` → WorkbenchController, workbench.blade.php)
-- RSVP handler (RsvpController, POST `/rsvp/{attendee}`)
-- BmsNotification model + BoardPack/BoardPackItem models
-- Document management resource (DocumentResource, VersionsRelationManager, DocumentDownloadController)
-- Board pack generator (BoardPackService → dompdf cover PDF + ZIP package, BoardPacksRelationManager, BoardPackController; auto-advances meeting status on publish)
-
-### Phase 2 remaining work:
-1. **Notification dispatch** — email on lifecycle transitions (scheduled → notice, rsvp_active → RSVP request, board_pack_generated → pack ready)
-2. **Calendar view** — month/week calendar of meetings for board members
-
-### Known issues to watch:
-- `$navigationGroup` must be `string|\UnitEnum|null` (not `?string`) in all Filament resources
-- Filament v5: all Actions in `Filament\Actions\*` namespace, never `Filament\Tables\Actions\*`
-- `BelongsToTenant` global scope name is `'tenant'` — use `withoutGlobalScope('tenant')` for cross-tenant queries
 
 ---
 
 ## Session Startup Checklist
 
-When starting a new Claude Code session:
-1. `cd /var/www/html/bmms`
-2. Read this `BMMS_CLAUDE.md`
-3. Check `storage/logs/laravel.log` for errors
-4. Confirm which phase/task we're working on
-5. Run `php artisan route:list | grep <feature>` before adding routes
-6. Run `php artisan migrate:status` to check migration state
+1. Read this file fully
+2. `php artisan migrate:status` — check for pending migrations
+3. `tail -20 storage/logs/laravel.log` — check for recent errors
+4. `git log --oneline -5` — see last 5 commits
+5. Confirm which phase/feature we're working on
+6. Run `php artisan route:list | grep <feature>` before adding new routes
