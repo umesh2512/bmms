@@ -10,12 +10,16 @@ class AgendaItem extends Model
 {
     protected $fillable = [
         'meeting_id', 'parent_id', 'order_column', 'title',
+        'naac_criteria_no', 'hod_resolution_no', 'hod_resolution_date',
+        'points_discussed', 'decisions', 'action_by', 'action_date',
         'description', 'presenter_id', 'time_allocated',
         'resolution_required', 'notes',
     ];
 
     protected $casts = [
-        'resolution_required' => 'boolean',
+        'resolution_required'  => 'boolean',
+        'hod_resolution_date'  => 'date',
+        'action_date'          => 'date',
     ];
 
     public function meeting(): BelongsTo
